@@ -1,5 +1,5 @@
 # M6-Performance-Monitoring
-requested by the operational manager to represent M6 bucket performance with graphs
+![image_alt](https://github.com/larasatinugroho/M6-Performance-Monitoring/blob/main/M6%20-%20Performance%20Monitoring.PNG?raw=true)
 
 ### Background overview
 The existing dashboard in Apache Superset did not track the progress of the core KPI for M6 agents: paid-up.
