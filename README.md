@@ -1,5 +1,8 @@
 # M6-Performance-Monitoring
-![image_alt](https://github.com/larasatinugroho/M6-Performance-Monitoring/blob/main/M6%20-%20Performance%20Monitoring.PNG?raw=true)
+
+<a href="https://github.com/larasatinugroho/M6-Performance-Monitoring/blob/main/M6%20-%20Performance%20Monitoring.PNG?raw=true">
+  <img src="https://github.com/larasatinugroho/M6-Performance-Monitoring/blob/main/M6%20-%20Performance%20Monitoring.PNG?raw=true" width="600"/>
+</a>
 
 ### Background overview
 The existing dashboard in Apache Superset did not track the progress of the core KPI for M6 agents: paid-up.
