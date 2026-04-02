@@ -1,0 +1,92 @@
+-- script dashboard M4/M6
+-- hive_store.risk_analysis.ln_dashboard_m6_dailypaidup: shows paidup of all agent M6 each day: do filtering based on its month
+drop table if exists hive_store.risk_analysis.ln_dashboard_m4m6_dailypaidup
+
+create table hive_store.risk_analysis.ln_dashboard_m4m6_dailypaidup as
+WITH job as 
+    (
+        select j.case_id,j.case_job_id,j.id job_id, j.status, c.person_uuid,jj.cuid c_uid,c.debt,c.status t_status,
+            jj.create_time start_time, 
+            substr(mte(jj.create_time,7),1,10) start_date,
+            if(j.status=0,to_unixtime(cast('2099-01-01' as timestamp))*1000,jj.update_time) end_time,
+            if(j.status=0,'2099-01-01',substr(mte(jj.update_time,7),1,10)) end_date
+        from hive.snap.coln_action_t_case_job j 
+        join hive.snap.coln_case_t_case c on j.case_id=c.id and c.country_id=1 and j.queue_code in ('SG_M6P')
+        left join hive.snap.coln_action_t_manual_dial_job jj on j.case_job_id=jj.case_job_id 
+        where substr(mte(j.create_time,7),1,10)<'2026-04-01'--cast(date_add('day',-1,date_trunc('month',date_add('month',1,date_add('day',-1,current_date)))) as varchar)--'{end_date}' 
+            and if(j.status=0,'2099-01-01',substr(mte(j.update_time,7),1,10))>='2026-03-01'--cast(date_trunc('month',date_add('day',-1,current_date)) as varchar)--'{start_date}' 
+ 	), gt_repayment as
+        (select * , substr(mte(p.repayment_time,7),1,10) pay_date from hive.snap.coln_action_t_biz_repayment p
+        where substr(mte(p.repayment_time,7),1,7)='2026-03'--date_format(date_trunc('month',date_add('day',-1,current_date)),'%Y-%m') 
+        and p.repayment_type in (0,2,5) and p.id not in (select id from hive_store.risk_analysis.repayment_duplicate_Error_repayment_id_info)
+    ), js_repayment as (
+    	select cast(substr(mte(j.repayment_time,7),1,10) as date) pay_date, j.c_uid, sum(paid_up) paid_up
+    	from (
+	    	select r.id pay_id, r.pay_date, r.repayment_time,j.c_uid, j.person_uuid, r.repayment_amount paid_up,bb.debt,j.t_status,j.case_id,
+	                row_number() over( PARTITION BY r.id ORDER BY j.start_time DESC) as rn
+	    	from job j
+	    	join hive.snap.coln_case_t_case_bill b on j.case_id = b.case_id 
+	    	join gt_repayment r on r.bill_id = b.bill_id and r.repayment_time between j.start_time and j.end_time
+	 		join hive.snap.coln_action_t_case_job bb on j.case_id = bb.case_id
+ 		) j
+ 		where j.rn = 1 
+ 		group by 1,2
+    ), assist_job as  
+        (
+        select j.case_id,j.case_job_id,j.id job_id, j.status, c.person_uuid,j3.create_by c_uid,c.debt,c.status t_status,
+        jj.create_time start_time,
+        substr(mte(jj.create_time,7),1,10) start_date,
+        if(j.status=0,to_unixtime(cast('2099-01-01' as timestamp))*1000,jj.update_time) end_time,
+        if(j.status=0,'2099-01-01',substr(mte(jj.update_time,7),1,10)) end_date
+        from hive.snap.coln_action_t_case_job j 
+        join hive.snap.coln_case_t_case c on j.case_id=c.id 
+        and c.country_id=1 and j.queue_code in ('SG_M6P') 
+        left join hive.snap.coln_action_t_offline_task jj on j.case_job_id=jj.job_id
+        left join mysql_risk_collection_new.collection.t_case_job_assist j3 on j.case_id=j3.case_id and j.case_job_id=j3.case_job_id
+        where j.assist_task_type=1 
+        and substr(mte(j.create_time,7),1,10)<'2026-04-01'--cast(date_add('day',-1,date_trunc('month',date_add('month',1,date_add('day',-1,current_date)))) as varchar)---'{end_date}' -- hari terakhir hari kemarin 
+        and if(j.status=0,'2099-01-01',substr(mte(j.update_time,7),1,10))>='2026-03-01'--cast(date_trunc('month',date_add('day',-1,current_date)) as varchar)--'{start_date}'
+     ), assist_js_repayment as 
+        (select cast(substr(mte(j.repayment_time,7),1,10) as date) pay_date, j.c_uid, sum(paid_up) paid_up
+        from 
+            (select r.id pay_id, r.pay_date,r.repayment_time,j.c_uid, j.person_uuid, r.repayment_amount paid_up,bb.debt,j.t_status,j.case_id,
+                row_number() over( PARTITION BY r.id ORDER BY j.start_time DESC) as rn 
+            from assist_job j
+            join hive.snap.coln_case_t_case_bill b on j.case_id=b.case_id
+            join gt_repayment r on r.bill_id=b.bill_id and r.repayment_time between j.start_time and j.end_time 
+           -- left join (select cas	e_id,dpd,remaining_debt debt,v_date from hive_store.risk_analysis.wangxa_dpd_info where v_date>='2022-11-30' group by 1,2,3,4) dd 
+           -- on j.case_id=dd.case_id and substr(mte(r.repayment_time,7),1,10)=dd.v_date
+           join hive.snap.coln_action_t_case_job bb on bb.case_id = j.case_id
+           )j
+         where j.rn = 1
+         group by 1,2
+     ), grid as (
+    	select g.pay_date, j.c_uid
+    	from (
+	    	select distinct cast(substr(mte(repayment_time,7),1,10) as date) pay_date
+	    	from gt_repayment
+    		) g
+    	cross join (
+    		select distinct c_uid
+    		from js_repayment
+    		) j
+    	)
+    select *,
+    	sum(paidup_daily) over(partition by c_uid order by pay_date) cummulative_paidup
+    from (
+	    select g.pay_date, g.c_uid,
+	    	coalesce (j.paid_up,0) dc_paidup,
+	    	coalesce (aj.paid_up,0) fc_paidup,
+	    	case 
+	    		when coalesce (aj.paid_up,0) is null then coalesce (j.paid_up,0)
+	    		else (coalesce (j.paid_up,0) - coalesce (aj.paid_up,0)) + coalesce (aj.paid_up,0) * 0.5
+	    	end as paidup_daily
+	    from grid g
+	    left join js_repayment j on g.pay_date = j.pay_date and g.c_uid = j.c_uid
+	    left join assist_js_repayment aj on g.pay_date = aj.pay_date and g.c_uid = aj.c_uid
+    )
+    order by 2,1
+   
+    	
+    	
+  
